@@ -1,13 +1,17 @@
 import os, re
 import FreeCAD, Mesh, MeshPart
 
-# Use the current directory (relative to the script)
-directory = os.path.abspath(".")
+# Use current directory
+directory = os.path.abspath("./FreeCAD/")
+out_dir = os.path.abspath("./STL/")
 
-# Regex pattern to skip bodies named "pin", "bolt", or starting with "washer"
-skip_pattern = re.compile(r'^(pin|bolt|washer.*)$', re.IGNORECASE)
+# Skip bodies named starting with "pin", "bolt", or "washer"
+skip_pattern = re.compile(r'^(pin.*|bolt.*|washer.*)$', re.IGNORECASE)
 
-# Iterate through all FCStd files in the current directory
+# Lower values yields smoother stls at the expense of processing time
+LINEAR_DEFLECTION=0.01
+ANGULAR_DEFLECTION=0.05
+
 for fname in os.listdir(directory):
     if fname.endswith('.FCStd'):
         fpath = os.path.join(directory, fname)
@@ -15,7 +19,6 @@ for fname in os.listdir(directory):
         doc = FreeCAD.openDocument(fpath)
         bodies_to_export = []
         
-        # Collect PartDesign bodies (filter out those matching the skip pattern)
         for obj in doc.Objects:
             if obj.TypeId == "PartDesign::Body":
                 if skip_pattern.match(obj.Label):
@@ -28,22 +31,20 @@ for fname in os.listdir(directory):
         
         if bodies_to_export:
             valid_meshes = []
-            # Create a mesh for each body
             for body in bodies_to_export:
                 shape = body.Shape
-                print(f"\nCreating mesh for body: {body.Label}")
                 try:
                     m = MeshPart.meshFromShape(Shape=shape, 
-                                               LinearDeflection=0.1, 
-                                               AngularDeflection=0.523599)
+                                               LinearDeflection=LINEAR_DEFLECTION, 
+                                               AngularDeflection=ANGULAR_DEFLECTION)
+                    
                     if m and len(m.Facets) > 0:
                         valid_meshes.append(m)
-                        print(f"Mesh created for {body.Label} with {len(m.Facets)} facets")
+                        print("Mesh created for", body.Label, "with", len(m.Facets), "facets")
                     else:
                         print("Empty mesh for", body.Label)
                 except Exception as e:
                     print("Error meshing", body.Label, ":", e)
-            
             if valid_meshes:
                 # Merge meshes if more than one exists
                 if len(valid_meshes) > 1:
@@ -51,30 +52,18 @@ for fname in os.listdir(directory):
                     for m in valid_meshes:
                         merged.addMesh(m)
                     mesh_to_export = merged
-                    print(f"\nMerged {len(valid_meshes)} meshes into one with {len(merged.Facets)} facets")
+                    print("Merged", len(valid_meshes), "meshes into one with", len(merged.Facets), "facets")
                 else:
                     mesh_to_export = valid_meshes[0]
-                
-                # Create a temporary document and add a Mesh::Feature object
-                tempDoc = FreeCAD.newDocument("TempMeshDoc")
-                mesh_obj = tempDoc.addObject("Mesh::Feature", "Mesh")
-                mesh_obj.Mesh = mesh_to_export
-                tempDoc.recompute()
-                
-                # Export the Mesh::Feature object
-                out_name = os.path.splitext(fname)[0] + ".stl"  # Change extension to .3mf if supported
-                out_path = os.path.join(directory, out_name)
+                out_name = os.path.splitext(fname)[0] + ".stl"
+                out_path = os.path.join(out_dir, out_name)
                 try:
-                    Mesh.export([mesh_obj], out_path)
-                    print("\nExported to", out_path)
+                    Mesh.export([mesh_to_export], out_path)
+                    print("Exported to", out_path)
                 except Exception as e:
-                    print("\nError exporting mesh:", e)
-                    
-                # Clean up the temporary document
-                FreeCAD.closeDocument(tempDoc.Name)
+                    print("Error exporting mesh:", e)
             else:
-                print("\nNo valid meshes to export in document", fname)
+                print("No valid meshes to export")
         else:
-            print("\nNo bodies to export in document", fname)
-        
+            print("No bodies to export")
         FreeCAD.closeDocument(doc.Name)
